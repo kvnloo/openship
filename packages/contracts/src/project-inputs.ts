@@ -365,6 +365,8 @@ export const CreateProjectBody = Type.Object({
   slug: Type.Optional(
     Type.String({ minLength: 1, maxLength: 63, pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" }),
   ),
+  /** Specific wildcard apex domain ID or domain name to provision subdomain under */
+  wildcardDomainId: Type.Optional(Type.String({ minLength: 1, maxLength: 253 })),
   // Local source
   localPath: Type.Optional(Type.String({ maxLength: 1000 })),
   // Git source

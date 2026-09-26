@@ -43,6 +43,11 @@ export {
 } from "./deployment.repo";
 export { createDomainRepo, type Domain, type NewDomain } from "./domain.repo";
 export {
+  createWildcardDomainRepo,
+  type WildcardDomain,
+  type NewWildcardDomain,
+} from "./wildcard-domain.repo";
+export {
   createDnsCredentialRepo,
   type DnsCredential,
   type NewDnsCredential,
@@ -281,6 +286,7 @@ import { createProjectGroupRepo } from "./project-group.repo";
 import { createProjectRepo } from "./project.repo";
 import { createDeploymentRepo } from "./deployment.repo";
 import { createDomainRepo } from "./domain.repo";
+import { createWildcardDomainRepo } from "./wildcard-domain.repo";
 import { createDnsCredentialRepo } from "./dns-credential.repo";
 import { createCredentialRepo } from "./credential.repo";
 import { createRouteRuleRepo } from "./route-rule.repo";
@@ -367,6 +373,7 @@ export function createRepositories(db: Database, encryption: ConfigurationEncryp
   project: createProjectRepo(db, encryption),
   deployment: createDeploymentRepo(db, encryption),
   domain: createDomainRepo(db),
+  wildcardDomain: createWildcardDomainRepo(db),
   dnsCredential: createDnsCredentialRepo(db),
   credential: createCredentialRepo(db),
   routeRule: createRouteRuleRepo(db),

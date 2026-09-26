@@ -1,5 +1,5 @@
 import { repos, type Domain } from "@repo/db";
-import { ConflictError } from "@repo/core";
+import { ConflictError, generateRandomHexSuffix } from "@repo/core";
 import { CloudRuntime } from "@repo/adapters";
 import {
   normalizeStoredPublicEndpoints,

@@ -3418,6 +3418,26 @@
       "page": "servers",
       "section": "Legacy network URLs",
       "description": "Compatibility alias for `PATCH /api/system/networks/preparations/:preparationId/connections`."
+    },
+    "GET /api/wildcard-domains": {
+      "page": "domains",
+      "description": "List all registered wildcard apex domains."
+    },
+    "POST /api/wildcard-domains": {
+      "page": "domains",
+      "description": "Register a new wildcard apex domain."
+    },
+    "GET /api/wildcard-domains/:id": {
+      "page": "domains",
+      "description": "Get a wildcard apex domain by id."
+    },
+    "PATCH /api/wildcard-domains/:id": {
+      "page": "domains",
+      "description": "Update a wildcard apex domain."
+    },
+    "DELETE /api/wildcard-domains/:id": {
+      "page": "domains",
+      "description": "Delete a wildcard apex domain."
     }
   }
 }

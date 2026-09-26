@@ -21,19 +21,25 @@ function headers(opts: SetupClientOptions): Record<string, string> {
   return h;
 }
 
-/**
- * Build the JSON payload for POST /api/system/setup from structured inputs.
- */
 export function buildSetupPayload(settings: {
   system?: SystemSettings;
   tunnel?: TunnelConfig;
   buildMode?: string;
   authMode?: string;
+  wildcardDomain?: string;
+  openshipDomain?: string;
 }): SetupPayload {
   const payload: SetupPayload = {
     defaultBuildMode: settings.buildMode || "auto",
     authMode: settings.authMode || "none",
   };
+
+  if (settings.wildcardDomain) {
+    payload.wildcardDomain = settings.wildcardDomain.trim();
+  }
+  if (settings.openshipDomain) {
+    payload.openshipDomain = settings.openshipDomain.trim();
+  }
 
   if (settings.system) {
     const s = settings.system;
@@ -69,6 +75,8 @@ export async function pushInstanceSettings(
     tunnel?: TunnelConfig;
     buildMode?: string;
     authMode?: string;
+    wildcardDomain?: string;
+    openshipDomain?: string;
   },
 ): Promise<boolean> {
   const fetchFn = getFetch(opts);

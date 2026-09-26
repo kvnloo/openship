@@ -28,6 +28,7 @@ import { useI18n } from "@/components/i18n-provider";
 
 import { BuildPreferences } from "./_components/BuildPreferences";
 import { AppearanceSetting } from "./_components/AppearanceSetting";
+import { WildcardDomainsSetting } from "./_components/WildcardDomainsSetting";
 import { RoutePreferences } from "./_components/RoutePreferences";
 import { DeployDefaults } from "./_components/DeployDefaults";
 import { CloudConnection } from "./_components/CloudConnection";
@@ -138,6 +139,7 @@ function SettingsPageInner() {
                   and both keep a per-project override; re-enable by uncommenting. */}
               {/* {showDeployDefaults && <DeployDefaults />} */}
               {showBuildPreferences && <BuildPreferences />}
+              <WildcardDomainsSetting />
               {/* {showBuildPreferences && <RoutePreferences />} */}
               <LanguageSetting />
               {/* Per-user shell: full platform vs Openship Mail's mail-only rail.

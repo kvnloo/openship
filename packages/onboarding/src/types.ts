@@ -64,6 +64,8 @@ export interface OnboardingState {
   buildMode: BuildMode;
   apiUrl: string;
   dashboardUrl: string;
+  wildcardDomain?: string;
+  openshipDomain?: string;
 }
 
 // ─── Setup API payload (sent to /api/system/setup) ───────────────────────────
@@ -84,6 +86,8 @@ export interface SetupPayload {
   sshArgs?: string;
   tunnelProvider?: string;
   tunnelToken?: string;
+  wildcardDomain?: string;
+  openshipDomain?: string;
 }
 
 // ─── Platform adapter (implemented per host: Electron, CLI, etc.) ────────────

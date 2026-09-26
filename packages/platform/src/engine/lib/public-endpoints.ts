@@ -155,13 +155,21 @@ export function isCloudManagedHostname(hostname: string): boolean {
   return normalized.length > suffix.length && normalized.endsWith(suffix);
 }
 
-export function managedHostnameToSlug(hostname: string): string | undefined {
+export function managedHostnameToSlug(hostname: string, knownWildcardApexes?: string[]): string | undefined {
   const normalized = normalizeCustomDomain(hostname);
-  const suffix = managedHostnameSuffix();
-  if (!normalized?.endsWith(suffix)) return undefined;
-
-  const slug = normalized.slice(0, -suffix.length);
-  return slug || undefined;
+  if (!normalized) return undefined;
+  const bases = [
+    ...(knownWildcardApexes?.map((d) => d.trim().toLowerCase()) ?? []),
+    getRoutingBaseDomain().trim().toLowerCase(),
+  ];
+  for (const base of bases) {
+    const suffix = `.${base}`;
+    if (normalized.endsWith(suffix)) {
+      const slug = normalized.slice(0, -suffix.length);
+      if (slug) return slug;
+    }
+  }
+  return undefined;
 }
 
 export function inferPublicRouteDomainType(
@@ -204,7 +212,11 @@ export function publicEndpointHostname(
   }
 
   const slug = normalizeSlug(endpoint.domain);
-  return slug ? `${slug}${managedHostnameSuffix()}` : undefined;
+  if (!slug) return undefined;
+  if (slug.includes(".")) {
+    return normalizeCustomDomain(slug);
+  }
+  return `${slug}${managedHostnameSuffix()}`;
 }
 
 /**

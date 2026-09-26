@@ -437,6 +437,34 @@ export async function selfRegister(c: Context) {
 }
 
 /**
+ * Register a custom domain for OpenShip itself (e.g. from setup/onboarding).
+ */
+export async function registerSelfAppDomain(rawHostname: string): Promise<void> {
+  const hostname = rawHostname
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
+  if (!hostname || !hostname.includes(".")) return;
+  const dashPort = env.OPENSHIP_DASHBOARD_PORT || 3001;
+  const { organizationId } = await resolveOrg();
+  const projectId = await ensureControlPlaneApp(organizationId, dashPort);
+  await ensureAdoptDeployment(projectId, dashPort).catch(() => {});
+  await repos.domain.findOrCreate({
+    projectId,
+    hostname,
+    domainType: "custom",
+    isPrimary: true,
+    externalIngress: true,
+    verified: true,
+    verifiedAt: new Date(),
+    status: "active",
+    sslStatus: "external",
+  });
+  await refreshSelfAppPublicUrl().catch(() => {});
+}
+
+/**
  * POST /api/system/self-edge/preflight — detect what owns ports 80/443 on THIS
  * machine before the wizard installs OpenResty (internal-token gated, local
  * executor). Read-only; the CLI uses it to prompt migrate/takeover/cancel.

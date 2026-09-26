@@ -122,6 +122,8 @@ to get valid IDs.
 
 {/* api-operations:start */}
 
+### Resource methods
+
 | Operation | SDK | REST API |
 | --- | --- | --- |
 | Stream domain verification progress. | `domains.verifyStream(id, input?, options?)` | `POST /api/domains/:id/verify/stream`<br />`domain:write` |
@@ -140,5 +142,15 @@ to get valid IDs.
 | Preview domain connection requirements. | `domains.preview(input)` | `POST /api/domains/preview`<br />`domain:read` |
 | Request renewal for eligible certificates. | `domains.renewAllSsl()` | `POST /api/domains/renew-all`<br />`domain:write` |
 | Verify pending domains visible to the caller. | `domains.verifyPending(input?)` | `POST /api/domains/verify-pending`<br />`domain:write` |
+
+### HTTP endpoints
+
+| Operation | SDK | REST API |
+| --- | --- | --- |
+| List all registered wildcard apex domains. | HTTP only | `GET /api/wildcard-domains`<br />`domain:list` |
+| Register a new wildcard apex domain. | HTTP only | `POST /api/wildcard-domains`<br />`domain:write` |
+| Get a wildcard apex domain by id. | HTTP only | `GET /api/wildcard-domains/:id`<br />`domain:read` |
+| Update a wildcard apex domain. | HTTP only | `PATCH /api/wildcard-domains/:id`<br />`domain:write` |
+| Delete a wildcard apex domain. | HTTP only | `DELETE /api/wildcard-domains/:id`<br />`domain:admin` |
 
 {/* api-operations:end */}

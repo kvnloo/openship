@@ -30,6 +30,8 @@ export * from "./exec";
 export * from "./services";
 export * from "./domain-inputs";
 export * from "./domains";
+export * from "./wildcard-domain-inputs";
+export * from "./wildcard-domains";
 export * from "./dns-inputs";
 export * from "./dns";
 export * from "./project-routing";

@@ -17,6 +17,8 @@ type PrefOption = {
 export function PreferencesStep({ state, onUpdate, onNext, onBack }: StepProps) {
   const { t } = useI18n();
   const [selected, setSelected] = useState<BuildMode>(state.buildMode);
+  const [wildcardDomain, setWildcardDomain] = useState(state.wildcardDomain ?? "");
+  const [openshipDomain, setOpenshipDomain] = useState(state.openshipDomain ?? "");
 
   const OPTIONS: PrefOption[] = [
     { id: "auto", title: t.onboarding.preferences.options.auto.title, desc: t.onboarding.preferences.options.auto.desc, icon: "sparkles" },
@@ -25,7 +27,11 @@ export function PreferencesStep({ state, onUpdate, onNext, onBack }: StepProps) 
   ];
 
   function handleContinue() {
-    onUpdate({ buildMode: selected });
+    onUpdate({
+      buildMode: selected,
+      wildcardDomain: wildcardDomain.trim() || undefined,
+      openshipDomain: openshipDomain.trim() || undefined,
+    });
     onNext();
   }
 
@@ -69,6 +75,46 @@ export function PreferencesStep({ state, onUpdate, onNext, onBack }: StepProps) 
               </button>
             );
           })}
+        </div>
+
+        <div className="space-y-4 my-6 text-start">
+          <div className="ob-form-group">
+            <label htmlFor="ob-wildcard-domain" className="flex items-center justify-between">
+              <span>Wildcard Domain</span>
+              <span className="text-xs text-muted-foreground font-normal">Optional</span>
+            </label>
+            <input
+              id="ob-wildcard-domain"
+              type="text"
+              value={wildcardDomain}
+              onChange={(e) => setWildcardDomain(e.target.value)}
+              placeholder="e.g. apps.example.com or *.apps.example.com"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Base domain for automatically generating project preview and free URLs (e.g. project.apps.example.com).
+            </p>
+          </div>
+
+          <div className="ob-form-group">
+            <label htmlFor="ob-openship-domain" className="flex items-center justify-between">
+              <span>OpenShip Domain</span>
+              <span className="text-xs text-muted-foreground font-normal">Optional</span>
+            </label>
+            <input
+              id="ob-openship-domain"
+              type="text"
+              value={openshipDomain}
+              onChange={(e) => setOpenshipDomain(e.target.value)}
+              placeholder="e.g. openship.example.com"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Custom domain to access this OpenShip instance dashboard.
+            </p>
+          </div>
         </div>
 
         <p className="ob-pref-hint">

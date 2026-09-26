@@ -577,6 +577,15 @@ const TABLES: ReadonlyArray<TableSpec> = [
     ],
     hasOrganizationId: true,
   },
+  {
+    sqlName: "wildcard_domain",
+    table: schema.wildcardDomain,
+    scopes: [
+      { in: "instance", via: "all-rows" },
+      { in: "organization", via: "organizationId" },
+    ],
+    hasOrganizationId: true,
+  },
 
   // Credentials
   // The generic third-party credential store (registry logins, DNS tokens). Carried by an

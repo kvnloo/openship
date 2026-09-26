@@ -116,20 +116,45 @@ export function resolveProvisionSsl(input: {
   return input.requiresSslTooling && (input.verified || input.sslStatus === "none");
 }
 
-export function resolveManagedHostname(hostname: string): { isManaged: boolean; subdomain?: string } {
-  const baseDomain = getRoutingBaseDomain().toLowerCase();
+export function resolveManagedHostname(
+  hostname: string,
+  knownWildcardDomains?: string[],
+): { isManaged: boolean; subdomain?: string; wildcardDomain?: string } {
   const normalized = hostname.trim().toLowerCase();
-  const suffix = `.${baseDomain}`;
+  const bases = [
+    ...(knownWildcardDomains?.map((d) => d.trim().toLowerCase()) ?? []),
+    getRoutingBaseDomain().toLowerCase(),
+  ];
 
-  if (!normalized.endsWith(suffix)) {
-    return { isManaged: false };
+  for (const base of bases) {
+    const suffix = `.${base}`;
+    if (normalized.endsWith(suffix)) {
+      const subdomain = normalized.slice(0, -suffix.length);
+      if (subdomain.length > 0) {
+        return {
+          isManaged: true,
+          subdomain,
+          wildcardDomain: base,
+        };
+      }
+    }
   }
 
-  const subdomain = normalized.slice(0, -suffix.length);
-  return {
-    isManaged: subdomain.length > 0,
-    subdomain: subdomain || undefined,
-  };
+  return { isManaged: false };
+}
+
+export async function resolveManagedHostnameAsync(
+  hostname: string,
+): Promise<{ isManaged: boolean; subdomain?: string; wildcardDomain?: string }> {
+  try {
+    const records = await repos.wildcardDomain.listAll();
+    return resolveManagedHostname(
+      hostname,
+      records.map((r) => r.domain),
+    );
+  } catch {
+    return resolveManagedHostname(hostname);
+  }
 }
 
 /**
@@ -218,6 +243,7 @@ export function buildProjectRouteDomains(opts: {
   }>;
   runtimeName: string;
   usesManagedRouting: boolean;
+  wildcardDomains?: string[];
   /**
    * #345: a static (file-served) deploy has NO port to proxy to — it serves the
    * built release dir off disk. A domain/endpoint with no explicit destination
@@ -228,7 +254,7 @@ export function buildProjectRouteDomains(opts: {
    */
   isStatic?: boolean;
 }): PlannedRouteDomain[] {
-  const { projectDomains, managedSlug, publicEndpoints, runtimeName, usesManagedRouting, isStatic } = opts;
+  const { projectDomains, managedSlug, publicEndpoints, runtimeName, usesManagedRouting, wildcardDomains, isStatic } = opts;
   const baseDomain = getRoutingBaseDomain();
   const seen = new Set<string>();
   const planned: PlannedRouteDomain[] = [];
@@ -260,7 +286,7 @@ export function buildProjectRouteDomains(opts: {
     if (!route.destination?.targetPath && route.destination?.targetPort === undefined) return;
     seen.add(normalized);
 
-    const managed = resolveManagedHostname(normalized);
+    const managed = resolveManagedHostname(normalized, wildcardDomains);
     const domainRow = domainByHostname.get(normalized);
     const isVerified = managed.isManaged
       ? true
@@ -456,6 +482,7 @@ export function buildServiceRouteDomains(opts: {
   service: Service;
   runtimeName: string;
   usesManagedRouting: boolean;
+  wildcardDomains?: string[];
   /** The project's domain rows keyed by hostname. Drives per-host SSL gating —
    *  same as the single-app path in add(): an external-ingress row serves plain
    *  HTTP (tls:false, no certbot), a manual-SSL row serves the uploaded cert,
@@ -464,7 +491,7 @@ export function buildServiceRouteDomains(opts: {
    *  SSL — the SSL step runs on the deploy path, which always supplies it. */
   domainByHostname?: Map<string, Domain>;
 }): PlannedRouteDomain[] {
-  const { project, service, runtimeName, usesManagedRouting } = opts;
+  const { project, service, runtimeName, usesManagedRouting, wildcardDomains } = opts;
   if (!service.exposed) return [];
 
   // One route per public endpoint (a multi-port service — e.g. Convex's API
@@ -492,7 +519,7 @@ export function buildServiceRouteDomains(opts: {
     if (seen.has(normalized)) continue;
     seen.add(normalized);
 
-    const managed = resolveManagedHostname(hostname);
+    const managed = resolveManagedHostname(hostname, wildcardDomains);
     const domainRow = opts.domainByHostname?.get(normalized);
     const external = !!domainRow?.externalIngress;
     const manualSsl = !!domainRow?.manualSsl;

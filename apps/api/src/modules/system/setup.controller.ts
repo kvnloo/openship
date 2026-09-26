@@ -145,6 +145,31 @@ export async function setup(c: Context) {
     await invalidateOpenRestyPaths(serverId);
   }
 
+  // Initial wildcard domain configured during setup
+  if (body.wildcardDomain && typeof body.wildcardDomain === "string" && body.wildcardDomain.trim()) {
+    try {
+      const { createWildcardDomain } = await import(
+        "@repo/platform/engine/modules/domains/wildcard-domain.service"
+      );
+      await createWildcardDomain({
+        domain: body.wildcardDomain.trim(),
+        isDefault: true,
+      });
+    } catch (err) {
+      console.warn("[setup] wildcard domain registration deferred/failed:", safeErrorMessage(err));
+    }
+  }
+
+  // OpenShip custom domain configured during setup
+  if (body.openshipDomain && typeof body.openshipDomain === "string" && body.openshipDomain.trim()) {
+    try {
+      const { registerSelfAppDomain } = await import("./self-app.controller");
+      await registerSelfAppDomain(body.openshipDomain.trim());
+    } catch (err) {
+      console.warn("[setup] self-app domain registration deferred/failed:", safeErrorMessage(err));
+    }
+  }
+
   clearAuthModeCache();
   return c.json({ ok: true });
 }

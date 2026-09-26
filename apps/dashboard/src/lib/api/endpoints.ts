@@ -626,4 +626,10 @@ export const endpoints = {
     cancelRestore: (restoreId: string) => `backup-restores/${restoreId}/cancel`,
     getRestore: (restoreId: string) => `backup-restores/${restoreId}`,
   },
+
+ wildcardDomains: {
+    list: "wildcard-domains",
+    create: "wildcard-domains",
+    item: (id: string) => `wildcard-domains/${id}`,
+  },
 } as const;
