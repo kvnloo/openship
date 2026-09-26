@@ -2930,6 +2930,22 @@
       "page": "mail",
       "description": "Recent backup runs for the mail server."
     },
+    "GET /api/mail/admin/:serverId/certificate": {
+      "page": "mail",
+      "description": "Read the mail certificate, SMTP/IMAP TLS checks and automatic renewal settings."
+    },
+    "PATCH /api/mail/admin/:serverId/certificate": {
+      "page": "mail",
+      "description": "Set `autoRenew` to enable or disable automatic mail certificate renewal. Monitoring continues when renewal is disabled."
+    },
+    "POST /api/mail/admin/:serverId/certificate/check": {
+      "page": "mail",
+      "description": "Recheck the certificate on disk and served by SMTP/IMAP without issuing a certificate or sending email."
+    },
+    "POST /api/mail/admin/:serverId/certificate/renew": {
+      "page": "mail",
+      "description": "Renew a due mail certificate through Openship Edge and reload Postfix/Dovecot, reusing a still-valid certificate and repairing its service configuration."
+    },
     "POST /api/mail/admin/:serverId/components/:key/:action": {
       "page": "mail",
       "description": "Run an action (`start`/`stop`/`restart`/…) on one component."
