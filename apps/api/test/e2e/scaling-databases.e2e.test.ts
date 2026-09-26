@@ -516,7 +516,10 @@ done
       expect((await client.projects.createClusterDatabase(project.id, input)).id).toBe(pending.id);
       let copy = await finish(pending);
       expect(copy.envKey).toBeNull();
-      expect((await observe(postgres)).envKey).toBe("DATABASE_URL");
+      // Observing saves a new revision. Keep the reviewed snapshot for the
+      // explicit switch below instead of sending its now-stale predecessor.
+      postgres = await observe(postgres);
+      expect(postgres.envKey).toBe("DATABASE_URL");
       expect(
         await query(
           copy,

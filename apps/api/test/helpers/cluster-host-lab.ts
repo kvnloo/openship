@@ -153,10 +153,13 @@ export class ClusterHostLab {
     return exec(this.docker, this.nodes[index].container, command, timeout);
   }
   async diagnostics() {
+    let storageCollected = false;
     for (const [index, node] of this.nodes.entries()) {
-      for (const command of [
+      const commands = [
         ["systemctl", "--failed", "--no-pager"],
         ["journalctl", "-u", "k3s", "-n", "40", "--no-pager"],
+        ["journalctl", "-u", "iscsid", "-n", "40", "--no-pager"],
+        ["lsblk", "-o", "NAME,TYPE,FSTYPE,MOUNTPOINTS"],
         [
           "sh",
           "-c",
@@ -167,7 +170,49 @@ export class ClusterHostLab {
           "-c",
           "test ! -f /etc/rancher/k3s/k3s.yaml || /usr/local/bin/k3s kubectl --request-timeout=10s get events -A --sort-by=.lastTimestamp | tail -40",
         ],
-      ]) {
+      ];
+      // Events only describe the failed mount. Capture the storage processes
+      // that create the device and export it so CI retains the actual cause.
+      const hasClusterAccess =
+        !storageCollected &&
+        (await this.exec(index, ["test", "-r", "/etc/rancher/k3s/k3s.yaml"], 10).then(
+          () => true,
+          () => false,
+        ));
+      if (hasClusterAccess) {
+        storageCollected = true;
+        const kubectl = [
+          "/usr/local/bin/k3s",
+          "kubectl",
+          "--request-timeout=10s",
+          "-n",
+          "longhorn-system",
+        ];
+        commands.push([
+          ...kubectl,
+          "get",
+          "volumes.longhorn.io,engines.longhorn.io,replicas.longhorn.io,sharemanagers.longhorn.io",
+          "-o",
+          "yaml",
+        ]);
+        for (const selector of [
+          "app=longhorn-manager",
+          "longhorn.io/component=instance-manager",
+          "longhorn.io/component=share-manager",
+        ])
+          commands.push([
+            ...kubectl,
+            "logs",
+            "-l",
+            selector,
+            "--all-containers",
+            "--tail=120",
+            "--prefix",
+            "--max-log-requests=8",
+            "--ignore-errors=true",
+          ]);
+      }
+      for (const command of commands) {
         try {
           console.error(`[${node.name}] ${await this.exec(index, command)}`);
         } catch (error) {
