@@ -2,7 +2,13 @@ name: Scaling E2E
 
 on:
   workflow_call: {}
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      journey:
+        description: Whole scaling check to run
+        type: choice
+        default: all
+        options: [all, application, storage, databases]
 
 permissions:
   contents: read
@@ -12,17 +18,13 @@ jobs:
   scaling:
     name: Scaling journey (${{ matrix.journey }})
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.timeout }}
+    timeout-minutes: ${{ fromJSON('{"application":30,"storage":80,"databases":105}')[matrix.journey] }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - journey: application
-            timeout: 30
-          - journey: storage
-            timeout: 80
-          - journey: databases
-            timeout: 105
+        # A direct manual run may select one whole check. Release callers have
+        # no journey input and always require all three checks.
+        journey: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.journey && inputs.journey != 'all' && format('["{0}"]', inputs.journey) || '["application","storage","databases"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
