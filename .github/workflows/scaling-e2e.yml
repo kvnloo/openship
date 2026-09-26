@@ -59,11 +59,23 @@ jobs:
       - name: Check Docker
         if: steps.resume.outputs.reused != 'true'
         run: docker info
+      - name: Check hardware virtualization for independent storage hosts
+        if: steps.resume.outputs.reused != 'true' && matrix.journey == 'storage'
+        run: |
+          sudo python3 - <<'PY'
+          import fcntl
+          import os
+          with open('/dev/kvm', 'rb+') as kvm:
+              assert fcntl.ioctl(kvm, 0xAE00, 0) == 12, 'KVM API is unavailable'
+              vm = fcntl.ioctl(kvm, 0xAE01, 0)
+              os.close(vm)
+          print('KVM can create independent Linux storage hosts.')
+          PY
       - name: Disable swap on the disposable Kubernetes host
-        if: steps.resume.outputs.reused != 'true'
-        # Nested hosts share the runner's kernel. Prepare this dedicated runner
-        # just like a supported server; keep the production swap guard intact.
-        # Never disable swap from the local test harness or on a user's server.
+        if: steps.resume.outputs.reused != 'true' && matrix.journey != 'storage'
+        # Container journeys share the runner's kernel; storage uses independent
+        # VM kernels. Keep production swap guards intact. Never change swap from
+        # the local test harness or on a user's server.
         run: |
           sudo swapoff -a
           test "$(wc -l < /proc/swaps)" -eq 1

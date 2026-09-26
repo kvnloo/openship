@@ -11,14 +11,21 @@ RUN_DOCKER_E2E=1 E2E_SCOPE=scaling-databases bun run --cwd apps/api test:e2e
 ```
 
 `E2E_SCOPE=scaling` runs all three sequentially. Application tests need at least
-4 GiB of Docker RAM. Storage and database tests need at least 6 GiB of Docker RAM
-and 25 GiB of local free disk. All need privileged containers and internet access
+4 GiB of Docker RAM. Database tests need at least 6 GiB of Docker RAM; storage
+needs an x86_64 Linux Docker host with KVM (`/dev/kvm`) and at least 8 GiB of RAM
+for three independent VMs. Both need 25 GiB of local free disk. All need
+privileged containers and internet access
 to the pinned software releases, image registries and Linux package mirrors.
 Fixtures use the product's Docker socket discovery, including Docker contexts
 and `DOCKER_HOST`. They never start a daemon or reclaim unrelated disk space.
-The storage journey requires swap to be disabled in the Linux Docker host:
-nested hosts share its kernel. CI prepares its disposable runner for this;
-the local harness leaves host memory settings unchanged.
+The application and database containers share the Docker host's kernel. CI
+disables swap on its disposable runner; the local harness leaves host memory
+settings unchanged. Storage VMs have their own kernels and no configured swap.
+On machines without x86 KVM, run the entire storage check through Actions:
+
+```sh
+gh workflow run scaling-e2e.yml --ref main -f journey=storage
+```
 
 The application fixture creates its own Docker network, an authenticated image registry,
 one K3s control node, two workers, and OpenShip Edge. Published test ports bind
@@ -66,7 +73,7 @@ or ACME issuance.
 
 ## Shared storage journey
 
-`scaling-stateful.e2e.test.ts` creates three isolated Linux/systemd/SSH hosts. It
+`scaling-stateful.e2e.test.ts` creates three isolated Linux/systemd/SSH VMs. It
 uses the production host installer and API to enable scaling and shared storage,
 with version resolution pinned for repeatability. It checks:
 
@@ -80,7 +87,12 @@ with version resolution pinned for repeatability. It checks:
 - Reading restored file contents, removing owned storage, and preserving external
   backups through the official uninstaller.
 
-The hosts use an isolated native Docker network and forwarded SSH ports. Local-host
+Each VM boots a checksum-verified Ubuntu cloud image, with independent OS and
+storage disks in labelled fixture volumes. Independent kernels are necessary:
+Linux's iSCSI control socket exists only in the initial network namespace, so
+separate Docker namespaces cannot represent separate iSCSI hosts. QEMU runs
+inside a disposable wrapper with the fixture network and forwarded SSH ports;
+no host interfaces or host disks are changed. Local-host
 convenience detection is explicitly disabled for these fixture rows so host
 commands cannot run on the developer's operating system. Application deployment
 uses the production workload adapter; public routing and the complete application

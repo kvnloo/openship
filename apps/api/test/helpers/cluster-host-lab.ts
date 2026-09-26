@@ -6,14 +6,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type Dockerode from "dockerode";
 import { DockerRuntime } from "@repo/adapters";
-import { eventually, exec, freePort } from "./scaling-lab";
+import { eventually, freePort } from "./scaling-lab";
 
 const run = promisify(execFile);
 const fixture = join(import.meta.dirname, "../fixtures/cluster-host");
 const sq = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 
-/** Real Linux/systemd/SSH machines in an isolated Docker network. Nothing uses
- * registered user servers, the developer's SSH keys, or the host Docker socket. */
+/** Real Linux VMs in an isolated Docker network. Each host has its own kernel,
+ * so iSCSI sessions, NFS mounts and disk failure tests use real host semantics.
+ * Nothing uses registered user servers or the developer's SSH keys. */
 export class ClusterHostLab {
   readonly id = `stateful-${randomUUID().slice(0, 8)}`;
   readonly nodes: Array<{
@@ -46,17 +47,24 @@ export class ClusterHostLab {
       );
     this.runtime = await DockerRuntime.create({ transport: "socket" });
     await this.runtime.assertReachable();
-    if ((await this.docker.info()).MemTotal < 6 * 1024 ** 3 - 256 * 1024 ** 2)
-      throw new Error("The stateful scaling journey needs at least 6 GiB of Docker memory.");
+    const info = await this.docker.info();
+    if (info.Architecture !== "x86_64")
+      throw new Error(
+        "The storage journey needs an x86_64 Linux Docker host with KVM. Run the storage check on CI when nested virtualization is unavailable locally.",
+      );
+    if (info.MemTotal < 8 * 1024 ** 3 - 256 * 1024 ** 2)
+      throw new Error(
+        "The stateful scaling journey needs at least 8 GiB of Docker memory for three independent Linux VMs.",
+      );
     this.directory = await mkdtemp(join(tmpdir(), "openship-cluster-hosts-"));
     const key = join(this.directory, "id_ed25519");
     await run("ssh-keygen", ["-t", "ed25519", "-N", "", "-f", key]);
     this.privateKey = await readFile(key, "utf8");
     const publicKey = await readFile(key + ".pub", "utf8");
     this.image = `openship-e2e:${this.id}-host`;
-    console.info("[stateful-e2e] Building isolated Linux hosts with systemd and SSH.");
+    console.info("[stateful-e2e] Building isolated Linux VMs with systemd and SSH.");
     const build = await this.docker.buildImage(
-      { context: fixture, src: ["Dockerfile"] },
+      { context: fixture, src: ["Dockerfile", "boot.py"] },
       { t: this.image },
     );
     await new Promise<void>((resolve, reject) =>
@@ -81,8 +89,8 @@ export class ClusterHostLab {
       const volumeName = `${name}-data`;
       await this.docker.createVolume({ Name: volumeName, Labels: { "openship.e2e": this.id } });
       this.volumes.push(this.docker.getVolume(volumeName));
-      // Nested containerd needs a real filesystem, not the host container's
-      // overlay upperdir. Keep runtime images separate from the storage disk.
+      // Separate guest OS/runtime and storage disks. Both are sparse files on
+      // labelled fixture volumes and are removed only by this lab's teardown.
       const runtimeVolumeName = `${name}-runtime`;
       await this.docker.createVolume({
         Name: runtimeVolumeName,
@@ -95,16 +103,16 @@ export class ClusterHostLab {
         Image: this.image,
         Labels: { "openship.e2e": this.id },
         ExposedPorts: { "22/tcp": {} },
-        Entrypoint: ["/bin/sh", "-ec"],
-        Cmd: [
-          `mkdir -p /root/.ssh; printf %s ${sq(Buffer.from(publicKey).toString("base64"))} | base64 -d > /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys; ssh-keygen -A; mount --make-rshared /; exec /sbin/init`,
+        Env: [
+          `OPENSHIP_E2E_NAME=${name}`,
+          `OPENSHIP_E2E_PUBLIC_KEY=${Buffer.from(publicKey).toString("base64")}`,
         ],
         HostConfig: {
           Privileged: true,
           ...{ CgroupnsMode: "private" },
           NetworkMode: this.id,
           Tmpfs: { "/run": "", "/run/lock": "", "/tmp": "" },
-          Binds: ["/lib/modules:/lib/modules:ro"],
+          Binds: ["/dev/kvm:/dev/kvm"],
           Mounts: [
             { Type: "volume", Source: volumeName, Target: "/var/lib/openship" },
             { Type: "volume", Source: runtimeVolumeName, Target: "/var/lib/rancher" },
@@ -124,10 +132,24 @@ export class ClusterHostLab {
       });
       await eventually(
         `${name}'s SSH service`,
-        () => exec(this.docker, container, ["systemctl", "is-active", "ssh"]),
+        () =>
+          this.exec(
+            index,
+            [
+              "sh",
+              "-ec",
+              "test -f /var/lib/cloud/instance/boot-finished; mountpoint -q /var/lib/openship; systemctl is-active ssh",
+            ],
+            10,
+          ),
         (output) => output.trim() === "active",
-        60_000,
-      );
+        240_000,
+      ).catch(async (error) => {
+        // beforeAll failures do not reach afterEach. Preserve the guest's boot
+        // output before afterAll removes the disposable wrapper and disks.
+        await this.bootLogs(container, name);
+        throw error;
+      });
     }
     console.info(`[stateful-e2e] ${count} Linux hosts are ready for real setup.`);
   }
@@ -149,12 +171,46 @@ export class ClusterHostLab {
     await container.start();
     return container;
   }
-  exec(index: number, command: string[], timeout = 45) {
-    return exec(this.docker, this.nodes[index].container, command, timeout);
+  async exec(index: number, command: string[], timeout = 45) {
+    const node = this.nodes[index];
+    const result = await run(
+      "ssh",
+      [
+        "-F",
+        "/dev/null",
+        "-i",
+        join(this.directory, "id_ed25519"),
+        "-p",
+        String(node.sshPort),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "GlobalKnownHostsFile=/dev/null",
+        "-o",
+        "LogLevel=ERROR",
+        "-o",
+        "ConnectTimeout=5",
+        "-o",
+        "ServerAliveInterval=5",
+        "-o",
+        "ServerAliveCountMax=3",
+        "root@127.0.0.1",
+        `timeout ${timeout} ${command.map(sq).join(" ")}`,
+      ],
+      { timeout: (timeout + 10) * 1000, maxBuffer: 2_000_000 },
+    );
+    return result.stdout;
   }
   async diagnostics() {
     let storageCollected = false;
     for (const [index, node] of this.nodes.entries()) {
+      await this.bootLogs(node.container, node.name);
       const commands = [
         ["systemctl", "--failed", "--no-pager"],
         ["journalctl", "-u", "k3s", "-n", "40", "--no-pager"],
@@ -221,6 +277,15 @@ export class ClusterHostLab {
       }
     }
   }
+  private async bootLogs(container: Dockerode.Container, name: string) {
+    try {
+      console.error(
+        `[${name}:boot] ${(await container.logs({ stdout: true, stderr: true, tail: 100 })).toString()}`,
+      );
+    } catch (error) {
+      console.error(String(error));
+    }
+  }
   async close() {
     const failures: unknown[] = [];
     for (const container of [...this.extra].reverse()) {
@@ -230,15 +295,14 @@ export class ClusterHostLab {
           throw new Error("Refusing to remove a foreign fixture container.");
         if (info.State.Paused) await container.unpause();
         if (info.State.Running && this.nodes.some((node) => node.container.id === container.id)) {
-          // systemd must stop its nested containers before Docker unmounts
-          // the fixture disks. Force removal alone can leave busy mounts.
-          await exec(
-            this.docker,
-            container,
+          // Stop guest workloads and flush their disks before shutting down
+          // QEMU. The wrapper never executes Kubernetes on the Docker host.
+          await this.exec(
+            this.nodes.findIndex((node) => node.container.id === container.id),
             [
               "sh",
               "-c",
-              "if [ -x /usr/local/bin/k3s-killall.sh ]; then /usr/local/bin/k3s-killall.sh; fi",
+              "if [ -x /usr/local/bin/k3s-killall.sh ]; then /usr/local/bin/k3s-killall.sh; fi; sync",
             ],
             45,
           ).catch((error) => console.error(String(error)));
