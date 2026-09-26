@@ -16,6 +16,9 @@ and 25 GiB of local free disk. All need privileged containers and internet acces
 to the pinned software releases, image registries and Linux package mirrors.
 Fixtures use the product's Docker socket discovery, including Docker contexts
 and `DOCKER_HOST`. They never start a daemon or reclaim unrelated disk space.
+The storage journey requires swap to be disabled in the Linux Docker host:
+nested hosts share its kernel. CI prepares its disposable runner for this;
+the local harness leaves host memory settings unchanged.
 
 The application fixture creates its own Docker network, an authenticated image registry,
 one K3s control node, two workers, and OpenShip Edge. Published test ports bind
@@ -110,6 +113,9 @@ all nodes, so acceptance does not depend on publishing the release first. It che
 
 Source-backup records are seeded from actual uploaded artifacts. The full backup
 scheduler/API capture journey remains covered by the existing backup E2Es.
+New data-check pods wait for authenticated connectivity before executing their
+data commands once. Only read-only connection checks are retried while the
+cluster applies network policy to the new pod.
 Importing a database does not automatically convert Compose services, host mounts
 or Docker private links. Selecting a new app target and applying its deployment
 remain separate reviewed actions. Redis archives are consistent per shard rather
@@ -132,6 +138,8 @@ are 30 minutes for apps, 80 for storage, and 105 for databases, including cold
 downloads and recovery waits. These are ceilings, not expected durations. Each
 job saves separate diagnostics. A missing daemon, failed pull, setup failure or
 assertion fails the job.
+A failed step stops its dependent journey and runs cleanup. The other CI matrix
+journeys continue, and every journey must pass before publishing.
 
 The latest native shared-storage and database-recovery additions have not completed
 a local acceptance run. Passing focused tests and the earlier application E2E is

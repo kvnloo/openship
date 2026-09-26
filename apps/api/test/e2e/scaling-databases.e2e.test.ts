@@ -186,6 +186,25 @@ describeDockerE2E.sequential(
               { name: "REDISCLI_AUTH", valueFrom: credential },
               { name: "REDIS_HOST", value: host },
             ];
+      // A new pod can start before its network-policy membership has reached
+      // every node. Establish an authenticated connection from this same pod
+      // before running the data command once; never retry a write or import.
+      const ready =
+        row.config.engine === "postgres"
+          ? `test "$(psql -X -A -t -v ON_ERROR_STOP=1 -c 'SELECT 1')" = 1`
+          : 'test "$(timeout 5 redis-cli -h "$REDIS_HOST" --raw PING)" = PONG';
+      const waitForConnection = `
+attempt=0
+while ! (${ready}) > /tmp/openship-connection.log 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    echo 'The authenticated database connection did not become ready from this pod.' >&2
+    cat /tmp/openship-connection.log >&2
+    exit 1
+  fi
+  sleep 1
+done
+`;
       const jobPath = `/apis/batch/v1/namespaces/${namespace}/jobs/${name}`;
       try {
         const result = await runClusterJob(
@@ -210,7 +229,7 @@ describeDockerE2E.sequential(
                         row.config.engine === "postgres"
                           ? postgresDatabaseImage(row.config)
                           : DATABASE_IMAGES.redis,
-                      command: ["sh", "-ec", command],
+                      command: ["sh", "-ec", waitForConnection + command],
                       env,
                       resources: {
                         requests: { cpu: "50m", memory: "64Mi" },
@@ -277,14 +296,12 @@ describeDockerE2E.sequential(
       const hosts: ClusterRuntimePlan["hosts"] = [];
       for (const [index, node] of lab.nodes.entries()) {
         const serverId = randomUUID();
-        await db
-          .insert(schema.servers)
-          .values({
-            id: serverId,
-            name: node.name,
-            organizationId: org.organizationId,
-            sshHost: node.privateIp,
-          });
+        await db.insert(schema.servers).values({
+          id: serverId,
+          name: node.name,
+          organizationId: org.organizationId,
+          sshHost: node.privateIp,
+        });
         hosts.push({
           serverId,
           name: node.name,
@@ -330,18 +347,16 @@ describeDockerE2E.sequential(
         clusterUid: (await lab.api.request("GET", "/api/v1/namespaces/kube-system")).metadata.uid,
         hosts,
       };
-      await db
-        .insert(schema.clusterRuntime)
-        .values({
-          id: lab.runtimeId,
-          organizationId: org.organizationId,
-          clusterId,
-          clusterRevision: cluster.revision,
-          requestId: randomUUID(),
-          status: "ready",
-          verifiedAt: new Date(),
-          plan,
-        });
+      await db.insert(schema.clusterRuntime).values({
+        id: lab.runtimeId,
+        organizationId: org.organizationId,
+        clusterId,
+        clusterRevision: cluster.revision,
+        requestId: randomUUID(),
+        status: "ready",
+        verifiedAt: new Date(),
+        plan,
+      });
       vi.doMock("@repo/platform/engine/lib/cluster-deployment-target", async (importOriginal) => {
         const actual =
           await importOriginal<
@@ -761,7 +776,9 @@ describeDockerE2E.sequential(
               }),
               ["failed"],
             );
-            expect(failed.error).toMatch(/integrity|manifest|checksum|digest|hash/i);
+            expect(failed.error).toContain(
+              "Incremental backup index disagrees with the recorded backup",
+            );
             expect(
               await query(
                 failed,

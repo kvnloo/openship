@@ -24,7 +24,7 @@ export async function scalingTaskImage(lab: ScalingLab) {
   };
   try {
     console.info("[database-e2e] Building the production backup/recovery task image.");
-    const result = await run(
+    const building = run(
       "docker",
       [
         "build",
@@ -42,14 +42,19 @@ export async function scalingTaskImage(lab: ScalingLab) {
         timeout: 1200000,
       },
     );
-    console.info((result.stdout + result.stderr).slice(-8000));
+    for (const stream of [building.child.stdout, building.child.stderr])
+      stream?.on("data", (chunk: Buffer) => {
+        const message = chunk.toString().trim();
+        if (message) console.info(`[database-e2e:build] ${message}`);
+      });
+    await building;
     await run("docker", ["save", "--output", archive, image], { timeout: 180000 });
     for (const [index, node] of lab.nodes.entries()) {
       await run("docker", ["cp", archive, `${node.container.id}:/tmp/openship-tasks.tar`], {
         timeout: 180000,
       });
-      // The K3s container image ships ctr separately from its server binary.
-      // Import into the kubelet's containerd namespace, not ctr's default one.
+      // The K3s image dispatches tools by executable name. Invoke ctr directly
+      // and import into the kubelet's containerd namespace.
       await lab.nodeExec(
         index,
         [
@@ -65,6 +70,7 @@ export async function scalingTaskImage(lab: ScalingLab) {
         180,
       );
       await lab.nodeExec(index, ["rm", "/tmp/openship-tasks.tar"]);
+      console.info(`[database-e2e] Recovery image loaded on ${node.name}.`);
     }
     return { image, dispose };
   } catch (error) {

@@ -60,6 +60,7 @@ export async function eventually<T>(
   while (Date.now() < deadline) {
     try {
       const value = await read();
+      lastError = undefined;
       if (accepts(value)) return value;
     } catch (error) {
       lastError = error;
@@ -209,6 +210,17 @@ export class ScalingLab {
   }
 
   async start(count = 3, options: { edge?: boolean } = {}) {
+    try {
+      await this.startNodes(count, options);
+    } catch (error) {
+      // beforeAll failures do not reach afterEach diagnostics. Keep the real
+      // node/service errors when a cluster cannot bootstrap or a pull fails.
+      console.error(await this.diagnostics());
+      throw error;
+    }
+  }
+
+  private async startNodes(count: number, options: { edge?: boolean }) {
     if (count > 3) {
       const disk = await statfs(tmpdir());
       if (disk.bavail * disk.bsize < 25 * 1024 ** 3)
@@ -349,22 +361,36 @@ export class ScalingLab {
       if (index === 0) {
         this.apiPort = Number(nodeInfo.NetworkSettings.Ports["6443/tcp"]![0].HostPort);
         this.edgePort = Number(nodeInfo.NetworkSettings.Ports["80/tcp"]![0].HostPort);
+        const kubeconfig = await eventually(
+          "K3s API credentials",
+          () => this.nodeExec(0, ["cat", "/etc/rancher/k3s/k3s.yaml"]),
+          Boolean,
+          180_000,
+        );
+        const config = parse(kubeconfig);
+        const decode = (value: string) => Buffer.from(value, "base64").toString();
+        this.credentials = {
+          ca: decode(config.clusters[0].cluster["certificate-authority-data"]),
+          cert: decode(config.users[0].user["client-certificate-data"]),
+          key: decode(config.users[0].user["client-key-data"]),
+        };
+        this.api = this.openApi();
       }
+      // Bring up the API before joining workers, then wait for each real
+      // kubelet. Nine simultaneous cold starts can starve the single runner's
+      // control plane while it bootstraps; no node is counted ready early.
+      await eventually(
+        `${name} to join and become Ready`,
+        () => this.api.request("GET", `/api/v1/nodes/${name}`),
+        (node) =>
+          node.status?.conditions?.some(
+            (condition: { type: string; status: string }) =>
+              condition.type === "Ready" && condition.status === "True",
+          ),
+        240_000,
+      );
+      console.info(`[scaling-e2e] ${name} is ready.`);
     }
-    const kubeconfig = await eventually(
-      "K3s API credentials",
-      () => this.nodeExec(0, ["cat", "/etc/rancher/k3s/k3s.yaml"]),
-      Boolean,
-      180_000,
-    );
-    const config = parse(kubeconfig);
-    const decode = (value: string) => Buffer.from(value, "base64").toString();
-    this.credentials = {
-      ca: decode(config.clusters[0].cluster["certificate-authority-data"]),
-      cert: decode(config.users[0].user["client-certificate-data"]),
-      key: decode(config.users[0].user["client-key-data"]),
-    };
-    this.api = this.openApi();
     await eventually(
       `${count} ready Kubernetes nodes`,
       () => this.api.request<{ items: KubernetesObject[] }>("GET", "/api/v1/nodes"),

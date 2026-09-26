@@ -37,6 +37,13 @@ jobs:
         run: bunx tsc --noEmit -p tsconfig.scaling-e2e.json
       - name: Check Docker
         run: docker info
+      - name: Disable swap on the disposable Kubernetes host
+        # Nested hosts share the runner's kernel. Prepare this dedicated runner
+        # just like a supported server; keep the production swap guard intact.
+        # Never disable swap from the local test harness or on a user's server.
+        run: |
+          sudo swapoff -a
+          test "$(wc -l < /proc/swaps)" -eq 1
       - name: Make room for disposable cluster hosts
         if: matrix.journey != 'application'
         # These are unused SDKs on the disposable GitHub runner. Do not copy

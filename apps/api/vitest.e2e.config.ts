@@ -94,6 +94,11 @@ export default defineConfig({
     // currently passes its own timeout inline.
     hookTimeout: 300_000,
     testTimeout: 300_000,
+    // Scaling steps share the resources created by preceding steps. A failed
+    // setup must fail the job immediately, with teardown and diagnostics,
+    // instead of running dependent mutations against an incomplete fixture.
+    // Independent journeys still run in separate CI matrix jobs.
+    bail: scope?.startsWith("scaling") ? 1 : 0,
     // One shared daemon, real containers, real volume names: parallel files
     // race each other on pulls and cleanup.
     fileParallelism: false,
