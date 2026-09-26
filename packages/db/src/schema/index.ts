@@ -15,6 +15,7 @@ export { githubInstallState, type GithubInstallStatePayload } from "./github-ins
 export { projectGroup, project, envVar } from "./project";
 export { deployment, buildSession } from "./deployment";
 export { domain } from "./domain";
+export { acmeAccount, domainDnsChallenge } from "./domain-dns-challenge";
 export { routeRule } from "./route-rule";
 export { webhookSource } from "./webhook-source";
 export {
@@ -85,4 +86,3 @@ export { credential } from "./credential";
 export { computeCluster, computeClusterMember } from "./compute-cluster";
 export { clusterRuntime } from "./cluster-runtime";
 export { clusterDatabase } from "./cluster-database";
-export { wildcardDomain } from "./wildcard-domain";

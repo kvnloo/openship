@@ -304,5 +304,3 @@ export type {
 
 /* --- Auth helpers -------------------------------------------------- */
 export { getAuthToken } from "./auth";
-export { wildcardDomainsApi } from "./wildcard-domains";
-export type { CreateWildcardDomainPayload, UpdateWildcardDomainPayload } from "./wildcard-domains";

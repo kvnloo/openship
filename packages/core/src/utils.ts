@@ -167,66 +167,6 @@ export function isWildcardHostname(host: string): boolean {
 }
 
 /**
- * Canonical stored form of a wildcard apex domain.
- * Accepts `*.example.com`, `*example.com`, or `example.com`, strips leading `*` / `*.`,
- * strips scheme / paths / trailing dots, lowercases, and trims whitespace.
- * e.g. `*.staging.example.com` -> `staging.example.com`
- */
-export function normalizeWildcardApexDomain(raw: string): string {
-  let normalized = (raw || "").trim().toLowerCase();
-  normalized = normalized.replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  normalized = normalized.replace(/^\*\.?/, "");
-  normalized = normalized.replace(/\.+$/, "");
-  return normalized;
-}
-
-/**
- * Validates whether `domain` is a valid wildcard apex domain.
- * Must be a multi-label public hostname without wildcards, path, port, or IP literals.
- */
-export function isValidWildcardApexDomain(domain: string): boolean {
-  const normalized = normalizeWildcardApexDomain(domain);
-  if (!normalized || normalized.length > 253) return false;
-  if (normalized === "localhost") return false;
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(normalized)) return false; // IPv4 literal
-  if (/[\s/:@\\?#]/.test(normalized)) return false;
-  if (normalized.includes("*") || normalized.includes("..")) return false;
-  const labels = normalized.split(".");
-  if (labels.length < 2) return false; // must have at least 2 labels (e.g. example.com)
-  return labels.every(
-    (label) => label.length >= 1 && label.length <= 63 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/i.test(label),
-  );
-}
-
-/**
- * Generate a cryptographically secure hex suffix of specified length (default: 6).
- */
-export function generateRandomHexSuffix(length = 6): string {
-  const byteCount = Math.ceil(length / 2);
-  const bytes = new Uint8Array(byteCount);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, length);
-}
-
-/**
- * Compose a collision-resistant subdomain under a wildcard apex:
- * `${slug}-${randomHex(6)}.${wildcardApex}`
- */
-export function formatWildcardSubdomain(
-  slug: string,
-  wildcardApex: string,
-  randomSuffix?: string,
-): string {
-  const cleanSlug = slugify(slug);
-  const cleanApex = normalizeWildcardApexDomain(wildcardApex);
-  const suffix = randomSuffix ?? generateRandomHexSuffix(6);
-  return `${cleanSlug}-${suffix}.${cleanApex}`;
-}
-
-/**
  * Public suffixes whose registrable domain is THREE labels (`example.co.uk`),
  * not two. Deliberately NOT the full Public Suffix List — that needs a
  * dependency we don't carry — just the handful common enough that mis-classifying

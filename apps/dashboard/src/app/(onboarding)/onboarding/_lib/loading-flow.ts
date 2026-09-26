@@ -90,8 +90,6 @@ async function runSelfHostedFlow(
     tunnel: state.tunnel,
     buildMode: state.buildMode,
     authMode: "none",
-    wildcardDomain: state.wildcardDomain,
-    openshipDomain: state.openshipDomain,
   });
 
   try {

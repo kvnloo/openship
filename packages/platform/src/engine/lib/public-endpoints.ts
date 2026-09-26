@@ -6,6 +6,7 @@ import {
   resolveServiceHostnameLabel,
   resolveRedirectStatus,
   normalizeCustomHostname,
+  isWildcardHostname,
 } from "@repo/core";
 import { getRoutingBaseDomain } from "./routing-domains";
 import { resolveServicePort, serviceKind } from "./deployable-service";
@@ -155,21 +156,13 @@ export function isCloudManagedHostname(hostname: string): boolean {
   return normalized.length > suffix.length && normalized.endsWith(suffix);
 }
 
-export function managedHostnameToSlug(hostname: string, knownWildcardApexes?: string[]): string | undefined {
+export function managedHostnameToSlug(hostname: string): string | undefined {
   const normalized = normalizeCustomDomain(hostname);
-  if (!normalized) return undefined;
-  const bases = [
-    ...(knownWildcardApexes?.map((d) => d.trim().toLowerCase()) ?? []),
-    getRoutingBaseDomain().trim().toLowerCase(),
-  ];
-  for (const base of bases) {
-    const suffix = `.${base}`;
-    if (normalized.endsWith(suffix)) {
-      const slug = normalized.slice(0, -suffix.length);
-      if (slug) return slug;
-    }
-  }
-  return undefined;
+  const suffix = managedHostnameSuffix();
+  if (!normalized?.endsWith(suffix)) return undefined;
+
+  const slug = normalized.slice(0, -suffix.length);
+  return slug || undefined;
 }
 
 export function inferPublicRouteDomainType(
@@ -212,11 +205,7 @@ export function publicEndpointHostname(
   }
 
   const slug = normalizeSlug(endpoint.domain);
-  if (!slug) return undefined;
-  if (slug.includes(".")) {
-    return normalizeCustomDomain(slug);
-  }
-  return `${slug}${managedHostnameSuffix()}`;
+  return slug ? `${slug}${managedHostnameSuffix()}` : undefined;
 }
 
 /**
@@ -891,7 +880,7 @@ export function resolveServiceEndpointUrls(
   })) {
     if (endpoint.port === undefined) continue;
     if (endpoint.domainType === "custom") {
-      if (endpoint.customDomain)
+      if (endpoint.customDomain && !isWildcardHostname(endpoint.customDomain))
         urls.push({ port: endpoint.port, url: `https://${endpoint.customDomain}` });
       continue;
     }
@@ -980,10 +969,10 @@ export interface ProjectAccess {
  *  verified row, else none. The single primary-selection rule the detail Access
  *  URL, the list card's primaryDomain, and the favicon refresh all share, so
  *  those surfaces can never disagree on which domain is "the" one. */
-export function pickCanonicalDomainRow<T extends Pick<ProjectDomainRow, "verified" | "isPrimary">>(
+export function pickCanonicalDomainRow<T extends Pick<ProjectDomainRow, "verified" | "isPrimary"> & { hostname?: string }>(
   rows: T[] | null | undefined,
 ): T | null {
-  const verified = (rows ?? []).filter((row) => row.verified);
+  const verified = (rows ?? []).filter((row) => row.verified && !isWildcardHostname(row.hostname ?? ""));
   return verified.find((row) => row.isPrimary) ?? verified[0] ?? null;
 }
 
@@ -1040,7 +1029,7 @@ export function resolveProjectAccess(input: {
     let kind: "custom" | "free" = "custom";
     for (const row of orderedVerified) {
       const h = normalizeCustomDomain(row.hostname);
-      if (!h || seen.has(h)) continue;
+      if (!h || isWildcardHostname(h) || seen.has(h)) continue;
       seen.add(h);
       urls.push(`https://${h}`);
       if (host === null) {

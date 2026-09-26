@@ -13,7 +13,6 @@ import {
 } from "@repo/db";
 import {
   slugify,
-  generateRandomHexSuffix,
   NotFoundError,
   ConflictError,
   ForbiddenError,
@@ -75,8 +74,6 @@ import {
   syncProjectRouteState,
   type ProjectRouteState,
 } from "../domains/project-route.service";
-import { resolveActiveWildcardApex } from "../domains/wildcard-domain.service";
-import { getRoutingBaseDomain } from "../../lib/routing-domains";
 import { applyProjectRouting } from "../domains/routing-apply.service";
 import { syncProjectManagedEdge } from "./project-runtime.service";
 import { normalizeStoredPublicEndpoints, publicEndpointHostname } from "../../lib/public-endpoints";
@@ -956,22 +953,6 @@ async function createProductionProject(
     ...(data.monorepoApps ?? []),
     ...((data as Partial<EnsureProjectBody>).services ?? []),
   ]);
-  const wildcardApex = await resolveActiveWildcardApex(
-    (data as any).wildcardDomainId,
-    organizationId,
-  );
-  if (
-    !data.publicEndpoints &&
-    wildcardApex &&
-    wildcardApex.toLowerCase() !== getRoutingBaseDomain().toLowerCase()
-  ) {
-    data.publicEndpoints = [
-      {
-        domain: `${slug}.${wildcardApex}`,
-        domainType: "free",
-      },
-    ];
-  }
   const { app, created: appCreated } = await ensureProjectApp(data, slug, organizationId);
   const routing = deriveNextProjectRouteState(
     {
@@ -1314,30 +1295,11 @@ export async function setProjectReleaseImageSource(
 
 /** Exported for the project CLONE, which needs the same "-2, -3, …" rule a fresh project gets —
  *  a duplicate named after its source collides by construction. */
-export async function uniqueProjectSlug(
-  organizationId: string,
-  baseSlug: string,
-  wildcardApex?: string,
-) {
+export async function uniqueProjectSlug(organizationId: string, baseSlug: string) {
   let slug = baseSlug;
   let suffix = 2;
 
-  const isTaken = async (candidate: string) => {
-    const project = await repos.project?.findBySlugInOrg?.(organizationId, candidate);
-    if (project) return true;
-    if (wildcardApex && repos.domain?.findByHostname) {
-      try {
-        const hostname = `${candidate}.${wildcardApex}`.toLowerCase();
-        const domainRow = await repos.domain.findByHostname(hostname);
-        if (domainRow) return true;
-      } catch {
-        // Safe fallback if mocked in tests
-      }
-    }
-    return false;
-  };
-
-  while (await isTaken(slug)) {
+  while (await repos.project.findBySlugInOrg(organizationId, slug)) {
     slug = `${baseSlug}-${suffix}`;
     suffix += 1;
   }
@@ -1678,13 +1640,7 @@ export async function getProject(projectId: string, organizationId: string) {
 
 /** @scope org — only reads organizationId as a DB key. */
 export async function createProject(data: EnsureProjectBody, organizationId: string, access?: { tokenId: string }) {
-  const wildcardApex = await resolveActiveWildcardApex(
-    (data as any).wildcardDomainId,
-    organizationId,
-  );
-  const nameSlug = slugify(data.name);
-  const desiredSlug = data.slug || nameSlug;
-  const slug = await uniqueProjectSlug(organizationId, desiredSlug, wildcardApex);
+  const slug = slugify(data.name);
 
   const existing = await findProjectByAppSlug(organizationId, slug);
   if (existing) throw new ConflictError(`Project "${data.name}" already exists`);
