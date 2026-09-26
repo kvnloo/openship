@@ -40,6 +40,8 @@ Downloaded base images may remain cached.
 - Requests during scale, update, rollback and failed deployment operations.
 - MCP cancellation, a real crashing workload and explicit redeployment.
 - Worker unavailability and recovery, plus Kubernetes replacing a deleted pod.
+- Refusing deletion while volume claims or unfinished file cleanup remain, including
+  force-orphan attempts, while the application continues serving requests.
 - MCP project deletion, owned namespace cleanup and removal of its public route.
 
 The crash test shortens the workload's native progress deadline to 20 seconds.
