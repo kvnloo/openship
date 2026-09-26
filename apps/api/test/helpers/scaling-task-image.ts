@@ -48,7 +48,22 @@ export async function scalingTaskImage(lab: ScalingLab) {
       await run("docker", ["cp", archive, `${node.container.id}:/tmp/openship-tasks.tar`], {
         timeout: 180000,
       });
-      await lab.nodeExec(index, ["k3s", "ctr", "images", "import", "/tmp/openship-tasks.tar"], 180);
+      // The K3s container image ships ctr separately from its server binary.
+      // Import into the kubelet's containerd namespace, not ctr's default one.
+      await lab.nodeExec(
+        index,
+        [
+          "ctr",
+          "--address",
+          "/run/k3s/containerd/containerd.sock",
+          "--namespace",
+          "k8s.io",
+          "images",
+          "import",
+          "/tmp/openship-tasks.tar",
+        ],
+        180,
+      );
       await lab.nodeExec(index, ["rm", "/tmp/openship-tasks.tar"]);
     }
     return { image, dispose };
