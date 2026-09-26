@@ -928,13 +928,13 @@ describeDockerE2E.sequential("application scaling through the complete deploymen
       const path = `/api/v1/namespaces/${namespace}/${collection}`;
       const created = await lab.api.request("POST", path, resource);
       try {
-        for (const body of [{}, { forceOrphan: true, wipeVolumes: true }]) {
+        for (const query of [{}, { forceOrphan: true, wipeVolumes: true }]) {
           const blocked = await mcp.result<{ code: string }>("delete_projects_by_id", {
             id: project.id,
-            body,
+            query,
           });
           expect(blocked.isError, JSON.stringify(blocked.data)).toBe(true);
-          expect(blocked.data.code).toBe("CLUSTER_VOLUMES_ATTACHED");
+          expect(blocked.data.code, JSON.stringify(blocked.data)).toBe("CLUSTER_VOLUMES_ATTACHED");
         }
         expect(await repos.project.findById(project.id)).toMatchObject({
           deletionInProgress: false,
