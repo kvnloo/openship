@@ -69,6 +69,8 @@ export {
   type CloudDockerWorkspace,
   createDeploymentRepo,
   createDomainRepo,
+  createDomainDnsChallengeRepo,
+  type DomainDnsChallenge,
   createServiceRepo,
   createServiceDeploymentRepo,
   createPersonalAccessTokenRepo,
