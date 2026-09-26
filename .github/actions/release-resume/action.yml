@@ -36,7 +36,9 @@ runs:
         RESUME_WORKFLOW: ${{ inputs.workflow }}
         RESUME_JOB_ID: ${{ inputs.job-id }}
         RESUME_ARTIFACT: ${{ inputs.artifact }}
-      run: bun scripts/release-resume.ts
+      run: |
+        bun test scripts/release-resume.test.ts
+        bun scripts/release-resume.ts
     - uses: actions/download-artifact@v8
       if: steps.check.outputs.reused == 'true' && inputs.artifact != ''
       with:

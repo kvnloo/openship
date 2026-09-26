@@ -12,6 +12,7 @@ import {
   RESUME_GUARD,
   successfulJob,
   trustedResumeRun,
+  unpublishedReleaseRuns,
   type ResumeRun,
 } from "./release-resume";
 import { buildWizardArgs } from "./release-args";
@@ -104,6 +105,62 @@ describe("release continuation", () => {
     ).toBeUndefined();
     expect(successfulJob([job], "Scaling journey (storage)")).toBeUndefined();
     expect(successfulJob([job, job], "Scaling journey (application)")).toBeUndefined();
+  });
+
+  it("checks older runs and all publishing attempts before moving an unpublished tag", async () => {
+    const initialFetch = globalThis.fetch;
+    const initialToken = process.env.GITHUB_TOKEN;
+    let olderStatus = "completed";
+    let publishConclusion = "skipped";
+    let publishingSteps: [] | undefined;
+    const paths: string[] = [];
+    process.env.GITHUB_TOKEN = "test-only";
+    globalThis.fetch = (async (url) => {
+      const path = String(url);
+      paths.push(path);
+      if (path.includes("/workflows/"))
+        return Response.json({
+          workflow_runs: path.includes("/release.yml/")
+            ? [
+                { ...run, id: 124, status: "completed", conclusion: "failure" },
+                { ...run, id: 123, status: olderStatus, conclusion: "failure" },
+              ]
+            : [],
+        });
+      return Response.json({
+        jobs: [
+          {
+            ...job,
+            name: "Publish GitHub release",
+            conclusion: path.includes("/runs/123/") ? publishConclusion : "skipped",
+            steps: publishingSteps,
+          },
+        ],
+      });
+    }) as typeof fetch;
+    try {
+      expect((await unpublishedReleaseRuns(repository, "v0.8.0")).map((item) => item.id)).toEqual([
+        124, 123,
+      ]);
+      expect(
+        paths
+          .filter((path) => path.includes("/jobs?"))
+          .every((path) => path.includes("filter=all")),
+      ).toBe(true);
+      for (publishConclusion of ["success", "failure", "cancelled"])
+        await expect(unpublishedReleaseRuns(repository, "v0.8.0")).rejects.toThrow(
+          "publishing attempt",
+        );
+      publishingSteps = [];
+      await expect(unpublishedReleaseRuns(repository, "v0.8.0")).resolves.toHaveLength(2);
+      publishConclusion = "skipped";
+      olderStatus = "in_progress";
+      await expect(unpublishedReleaseRuns(repository, "v0.8.0")).rejects.toThrow("still running");
+    } finally {
+      globalThis.fetch = initialFetch;
+      if (initialToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = initialToken;
+    }
   });
 
   it("keeps production, dependency and unknown helper changes in every scope", () => {

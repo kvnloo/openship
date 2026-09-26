@@ -55,7 +55,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildWizardArgs, type WizardAnswers } from "./release-args";
 import { extractChangelogSection } from "./changelog-notes";
-import { RESUME_TRAILER, resumeRuns } from "./release-resume";
+import { RESUME_TRAILER, resumeRuns, unpublishedReleaseRuns } from "./release-resume";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const ROOT_PKG = join(ROOT, "package.json");
@@ -171,7 +171,7 @@ if (cmd === "docker") {
 }
 if (cmd === "continue") {
   try {
-    continueRelease();
+    await continueRelease();
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
@@ -500,17 +500,12 @@ function watchCi(t: string, fallbackUrl: string, notBefore = Date.now() - 30_000
 /** Continue an unpublished tag. Compare-and-swap protects against another
  * maintainer moving it between inspection and push. Published bytes are never
  * retagged by this path; they require a new version instead. */
-function continueRelease(): void {
+async function continueRelease(): Promise<void> {
   if (!dryRun) preflight();
   const targetTag = `v${readVersion(API_PKG)}`;
   const repository = ghOwnerRepo();
   if (!repository) throw new Error("Cannot determine the GitHub repository from origin.");
   const repo = `${repository.owner}/${repository.repo}`;
-  const api = <T>(path: string): T => {
-    const result = spawnSync("gh", ["api", path], { encoding: "utf8", cwd: ROOT });
-    if (result.status !== 0) throw new Error(`Could not inspect release history: ${result.stderr.trim()}`);
-    return JSON.parse(result.stdout) as T;
-  };
   const remoteRef = git("ls-remote", "--refs", "origin", `refs/tags/${targetTag}`, { capture: true }).trim();
   const remoteOid = remoteRef.split(/\s+/)[0];
   if (!remoteOid || !/^[a-f0-9]{40}$/.test(remoteOid))
@@ -526,22 +521,15 @@ function continueRelease(): void {
     throw new Error(`openship@${version} is already on npm. Release a new version instead.`);
   if (!npm.stderr.includes("E404")) throw new Error("Could not verify whether this version is already on npm.");
 
-  type Run = { id: number; head_sha: string; head_branch: string; status: string; conclusion: string | null };
-  const previous: Run[] = [];
-  for (const workflow of ["release.yml", "docker-images.yml"]) {
-    const runs = api<{ workflow_runs: Run[] }>(`repos/${repo}/actions/workflows/${workflow}/runs?event=push&branch=${encodeURIComponent(targetTag)}&per_page=30`);
-    const run = runs.workflow_runs.find((item) => item.head_branch === targetTag);
-    if (!run) continue;
-    if (run.status !== "completed") throw new Error(`${workflow} is still running. Let it finish before continuing the release.`);
-    const jobs = api<{ jobs: Array<{ name: string; conclusion: string | null }> }>(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
-    if (jobs.jobs.some((job) => job.name.startsWith("Publish ") && job.conclusion === "success"))
-      throw new Error(`${targetTag} has already published artifacts. Release a new version instead.`);
-    git("merge-base", "--is-ancestor", run.head_sha, "HEAD");
-    previous.push(run);
-  }
+  const previous = await unpublishedReleaseRuns(repo, targetTag);
   if (!previous.some((run) => run.conclusion !== "success"))
     throw new Error(`No failed release run found for ${targetTag}.`);
-  const annotation = git("for-each-ref", `refs/tags/${targetTag}`, "--format=%(contents)", { capture: true });
+  // Read the inspected remote object, not a potentially stale local tag.
+  git("fetch", "--no-tags", "origin", `refs/tags/${targetTag}`);
+  if (git("rev-parse", "FETCH_HEAD", { capture: true }).trim() !== remoteOid)
+    throw new Error("The release tag changed during inspection. Retry continuation.");
+  git("merge-base", "--is-ancestor", "FETCH_HEAD^{commit}", "HEAD");
+  const annotation = git("cat-file", "-p", "FETCH_HEAD", { capture: true });
   const runIds = [...new Set([...previous.map((run) => String(run.id)), ...resumeRuns(annotation)])].slice(0, 12);
   log(`Continue ${targetTag} with ${git("rev-parse", "--short", "HEAD", { capture: true }).trim()}`);
   log(`Previous runs: ${runIds.join(", ")}`);

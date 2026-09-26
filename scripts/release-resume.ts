@@ -107,11 +107,16 @@ export interface ResumeRun {
   repository: { full_name: string };
   head_repository?: { full_name: string };
 }
+export interface ReleaseHistoryRun extends ResumeRun {
+  status: string;
+  conclusion: string | null;
+}
 export interface ResumeJob {
   name: string;
   status: string;
   conclusion: string | null;
   html_url: string;
+  steps?: Array<{ name: string; status: string; conclusion: string | null }>;
 }
 
 /** Bind the reuse inputs to the real job, including its matrix expression.
@@ -200,6 +205,44 @@ async function allPages<T>(path: string, key: string): Promise<T[]> {
     if (result[key]!.length < 100) return items;
   }
   throw new Error("Release history exceeded the supported page limit.");
+}
+
+/** Inspect every attempt, including older reruns. A failed publishing job can
+ * already have written public tags. A cancellation with no steps never ran. */
+export async function unpublishedReleaseRuns(
+  repository: string,
+  tag: string,
+): Promise<ReleaseHistoryRun[]> {
+  const previous: ReleaseHistoryRun[] = [];
+  for (const workflow of ["release.yml", "docker-images.yml"]) {
+    const runs = await allPages<ReleaseHistoryRun>(
+      `repos/${repository}/actions/workflows/${workflow}/runs?event=push&branch=${encodeURIComponent(tag)}`,
+      "workflow_runs",
+    );
+    for (const run of runs.filter((item) => item.head_branch === tag)) {
+      if (run.status !== "completed")
+        throw new Error(
+          `${workflow} run ${run.id} is still running. Let it finish before continuing the release.`,
+        );
+      const jobs = await allPages<ResumeJob>(
+        `repos/${repository}/actions/runs/${run.id}/jobs?filter=all`,
+        "jobs",
+      );
+      if (
+        jobs.some(
+          (job) =>
+            job.name.startsWith("Publish ") &&
+            job.conclusion !== "skipped" &&
+            !(job.conclusion === "cancelled" && job.steps?.length === 0),
+        )
+      )
+        throw new Error(
+          `${tag} has a publishing attempt in run ${run.id}. Release a new version instead of replacing potentially published artifacts.`,
+        );
+      previous.push(run);
+    }
+  }
+  return previous.sort((a, b) => b.id - a.id);
 }
 
 export async function findReusableJob(options: {
