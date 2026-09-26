@@ -259,6 +259,28 @@ describeDockerE2E.sequential("application scaling through the complete deploymen
         };
         return {
           ...actual,
+          // Storage guards use the same real API as workloads. Only the host
+          // connection is substituted; this lab did not run the SSH installer.
+          openClusterApi: async (
+            organizationId: string,
+            requestedClusterId: string,
+            runtimeId?: string,
+          ) => {
+            expect(organizationId).toBe(org.organizationId);
+            expect(requestedClusterId).toBe(clusterId);
+            const current = await actual.requireClusterDeploymentTarget(
+              organizationId,
+              requestedClusterId,
+              runtimeId,
+            );
+            return {
+              api: lab.openApi(),
+              runtime: current.runtime,
+              gateway: hosts[0],
+              edgeSourceIps,
+              target: { id: hosts[0].serverId, isLocal: false },
+            };
+          },
           resolveClusterDeploymentRuntime: locate,
           resolveClusterDeploymentPlatform: async (
             snapshot: DeploymentMeta,
@@ -395,6 +417,13 @@ describeDockerE2E.sequential("application scaling through the complete deploymen
         }
       }
       console.error(await lab.diagnostics());
+      // Keep the API cause visible after verbose Kubernetes diagnostics; MCP
+      // correctly redacts unexpected server errors in its public response.
+      for (const call of streamErrors?.mock.calls.filter(
+        ([message]: unknown[]) =>
+          typeof message === "string" && message.startsWith("[UNHANDLED ERROR]"),
+      ) ?? [])
+        console.error("[scaling-e2e] API failure:", ...call);
     }
   }, 120_000);
 
@@ -864,6 +893,72 @@ describeDockerE2E.sequential("application scaling through the complete deploymen
     expect((await repos.deployment.listByProject(project.id)).rows).toHaveLength(history);
     expect((await clusterState()).activeDeploymentId).toBe(scaled.deploymentId);
   }, 360_000);
+
+  it("preserves the application while shared files or pending file cleanup remain", async () => {
+    const namespace = kubernetesProjectNamespace(project.id);
+    const name = "project-deletion-storage-guard";
+    const labels = {
+      "openship.io/project": kubernetesIdLabel(project.id),
+      "openship.io/runtime": lab.runtimeId,
+    };
+    for (const [collection, resource] of [
+      [
+        "persistentvolumeclaims",
+        {
+          apiVersion: "v1",
+          kind: "PersistentVolumeClaim",
+          metadata: { name, labels },
+          // An unbound claim exercises the guard without provisioning disks.
+          spec: {
+            accessModes: ["ReadWriteMany"],
+            storageClassName: "",
+            resources: { requests: { storage: "1Mi" } },
+          },
+        },
+      ],
+      [
+        "configmaps",
+        {
+          apiVersion: "v1",
+          kind: "ConfigMap",
+          metadata: { name, labels: { ...labels, "openship.io/volume-deletion": "true" } },
+        },
+      ],
+    ] as const) {
+      const path = `/api/v1/namespaces/${namespace}/${collection}`;
+      const created = await lab.api.request("POST", path, resource);
+      try {
+        for (const body of [{}, { forceOrphan: true, wipeVolumes: true }]) {
+          const blocked = await mcp.result<{ code: string }>("delete_projects_by_id", {
+            id: project.id,
+            body,
+          });
+          expect(blocked.isError, JSON.stringify(blocked.data)).toBe(true);
+          expect(blocked.data.code).toBe("CLUSTER_VOLUMES_ATTACHED");
+        }
+        expect(await repos.project.findById(project.id)).toMatchObject({
+          deletionInProgress: false,
+        });
+        expect((await lab.api.request("GET", `${path}/${name}`)).metadata.uid).toBe(
+          created.metadata.uid,
+        );
+        expect((await lab.request(hostname)).status).toBe(200);
+      } finally {
+        await lab.api.request("DELETE", `${path}/${name}`, {
+          preconditions: { uid: created.metadata.uid },
+        });
+        await eventually(
+          "the fixture's storage guard resource to be removed",
+          () =>
+            lab.api.request<{ items: KubernetesObject[] }>(
+              "GET",
+              `${path}?fieldSelector=${encodeURIComponent(`metadata.name=${name}`)}`,
+            ),
+          ({ items }) => items.length === 0,
+        );
+      }
+    }
+  }, 180_000);
 
   it("removes the application, its owned namespace and public route through normal project cleanup", async () => {
     const removed = await mcp.call<Awaited<ReturnType<OpenshipClient["projects"]["remove"]>>>(
